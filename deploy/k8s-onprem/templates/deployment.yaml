@@ -51,25 +51,38 @@ spec:
         release: {{ .Release.Name }}
 
     spec:
-      volumes:
-        - name: models
-          nfs:
-            server: {{ .Values.image.modelRepositoryServer }}
-            path: {{ .Values.image.modelRepositoryPath }}
-            readOnly: false
+#      volumes:
+#        - name: models
+#          nfs:
+#            server: {{ .Values.image.modelRepositoryServer }}
+#            path: {{ .Values.image.modelRepositoryPath }}
+#            readOnly: false
       containers:
         - name: {{ .Chart.Name }}
           image: "{{ .Values.image.imageName }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
-          volumeMounts:
-            - mountPath: /models
-              name: models
+#          volumeMounts:
+#            - mountPath: /models
+#              name: models
 
           resources:
             limits:
               nvidia.com/gpu: {{ .Values.image.numGpus }}
 
-          args: ["tritonserver", "--model-repository=/models"]
+#          args: ["tritonserver", "--model-repository=/models"]
+          args: ["tritonserver", "--model-repository={{ .Values.image.modelRepository_s3 }}"]
+          env:
+            - name: AWS_ACCESS_KEY_ID
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.image.modelRepository_s3_secret }}
+                  key: AWS_ACCESS_KEY_ID
+                  #value: HYP4GUXAQBE5TGHR3AQN
+            - name: AWS_SECRET_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.image.modelRepository_s3_secret }}
+                  key: AWS_SECRET_ACCESS_KEY
 
           ports:
             - containerPort: 8000

@@ -31,11 +31,17 @@ tags:
 image:
   imageName: nvcr.io/nvidia/tritonserver:21.10-py3
   pullPolicy: IfNotPresent
-  modelRepositoryServer: < Replace with the IP Address of your file server >
-  modelRepositoryPath: /srv/models
+  #modelRepositoryServer: < Replace with the IP Address of your file server >
+  #modelRepositoryPath: /srv/models
+  modelRepository_s3:  "s3://https://s3.ssl-hep.org:443/triton-8a469661-57ce-494b-84d0-c91899b9458d/models"
+  modelRepository_s3_secret: triton-s3-secret
   numGpus: 1
 
 traefik:
+  service:
+    type: ClusterIP
+    #annotations:
+    #  external-dns.alpha.kubernetes.io/hostname: triton.af.uchicago.edu
   ports:
     triton-http:
       port: 18000
