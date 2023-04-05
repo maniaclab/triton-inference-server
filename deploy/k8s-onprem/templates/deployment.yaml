@@ -92,11 +92,12 @@ spec:
             - containerPort: 8002
               name: metrics
           livenessProbe:
+            initialDelaySeconds: {{ .Values.deployment.readinessProbe.initialDelaySeconds }}
             httpGet:
               path: /v2/health/live
               port: http
           readinessProbe:
-            initialDelaySeconds: 5
+            initialDelaySeconds: {{ .Values.deployment.readinessProbe.initialDelaySeconds }}
             periodSeconds: 5
             httpGet:
               path: /v2/health/ready

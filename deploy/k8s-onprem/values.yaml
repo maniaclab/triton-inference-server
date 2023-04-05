@@ -37,6 +37,12 @@ image:
   modelRepository_s3_secret: triton-s3-secret
   numGpus: 1
 
+deployment:
+  livenessProbe:
+    initialDelaySeconds: 600
+  readinessProbe:
+    initialDelaySeconds: 600
+
 traefik:
   service:
     type: ClusterIP
