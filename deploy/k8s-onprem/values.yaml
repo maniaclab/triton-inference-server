@@ -39,9 +39,9 @@ image:
 
 deployment:
   livenessProbe:
-    initialDelaySeconds: 600
+    initialDelaySeconds: 10
   readinessProbe:
-    initialDelaySeconds: 600
+    initialDelaySeconds: 10
 
 traefik:
   service:
