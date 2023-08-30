@@ -42,12 +42,16 @@ export CUDA_VISIBLE_DEVICES=0
 
 RET=0
 
+CLIENT_PLUGIN_TEST="./grpc_client_plugin_test.py"
+BASIC_AUTH_TEST="./grpc_basic_auth_test.py"
+NGINX_CONF="./nginx.conf"
 # On windows the paths invoked by the script (running in WSL) must use
 # /mnt/c when needed but the paths on the tritonserver command-line
 # must be C:/ style.
 if [[ "$(< /proc/sys/kernel/osrelease)" == *microsoft* ]]; then
     SDKDIR=${SDKDIR:=C:/sdk}
     MODELDIR=${MODELDIR:=C:/models}
+    CLIENT_PLUGIN_MODELDIR=${MODELDIR:=C:/client_plugin_models}
     DATADIR=${DATADIR:="/mnt/c/data/inferenceserver/${REPO_VERSION}"}
     BACKEND_DIR=${BACKEND_DIR:=C:/tritonserver/backends}
     SERVER=${SERVER:=/mnt/c/tritonserver/bin/tritonserver.exe}
@@ -93,6 +97,7 @@ if [[ "$(< /proc/sys/kernel/osrelease)" == *microsoft* ]]; then
     CC_UNIT_TEST=${SDKDIR}/python/cc_client_test
 else
     MODELDIR=${MODELDIR:=`pwd`/models}
+    CLIENT_PLUGIN_MODELDIR=${CLIENTPLUGINMODELDIR:=`pwd`/client_plugin_models}
     DATADIR=${DATADIR:="/data/inferenceserver/${REPO_VERSION}"}
     TRITON_DIR=${TRITON_DIR:="/opt/tritonserver"}
     SERVER=${TRITON_DIR}/bin/tritonserver
@@ -137,6 +142,7 @@ else
     SIMPLE_CUSTOM_ARGS_CLIENT=../clients/simple_grpc_custom_args_client
     CC_UNIT_TEST=../clients/cc_client_test
 fi
+PYTHON_UNIT_TEST=python_unit_test.py
 
 # Add string_dyna_sequence model to repo
 cp -r ${MODELDIR}/simple_dyna_sequence ${MODELDIR}/simple_string_dyna_sequence
@@ -333,6 +339,37 @@ set -e
 kill $SERVER_PID
 wait $SERVER_PID
 
+SERVER_ARGS="--backend-directory=${BACKEND_DIR} --model-repository=${CLIENT_PLUGIN_MODELDIR} --http-header-forward-pattern=.* --grpc-header-forward-pattern=.*"
+run_server
+if [ "$SERVER_PID" == "0" ]; then
+    echo -e "\n***\n*** Failed to start $SERVER\n***"
+    cat $SERVER_LOG
+    exit 1
+fi
+
+set +e
+python3 $CLIENT_PLUGIN_TEST >> ${CLIENT_LOG}.python.plugin 2>&1
+if [ $? -ne 0 ]; then
+    cat ${CLIENT_LOG}.python.plugin
+    RET=1
+fi
+set -e
+
+# Create a password file with username:password
+echo -n 'username:' > pswd
+echo "password" | openssl passwd -stdin -apr1 >> pswd
+nginx -c `pwd`/$NGINX_CONF
+
+python3 $BASIC_AUTH_TEST
+if [ $? -ne 0 ]; then
+    cat ${CLIENT_LOG}.python.plugin.auth
+    RET=1
+fi
+service nginx stop
+
+kill $SERVER_PID
+wait $SERVER_PID
+
 export GRPC_TRACE=compression, channel
 export GRPC_VERBOSITY=DEBUG
 SERVER_ARGS="--backend-directory=${BACKEND_DIR} --model-repository=${MODELDIR} --grpc-infer-response-compression-level=high"
@@ -453,7 +490,7 @@ wait $SERVER_PID
 # Run cpp client unit test
 rm -rf unit_test_models && mkdir unit_test_models
 cp -r $DATADIR/qa_model_repository/onnx_int32_int32_int32 unit_test_models/.
-cp -r ${MODELDIR}/simple unit_test_models/. 
+cp -r ${MODELDIR}/simple unit_test_models/.
 
 SERVER_ARGS="--backend-directory=${BACKEND_DIR} --model-repository=unit_test_models
             --trace-file=global_unittest.log --trace-level=TIMESTAMPS --trace-rate=1"
@@ -504,7 +541,7 @@ for i in \
     fi
 
     set +e
-    $CC_UNIT_TEST --gtest_filter=HTTP*$i >> ${CLIENT_LOG}.$i 2>&1
+    $CC_UNIT_TEST --gtest_filter=GRPC*$i >> ${CLIENT_LOG}.$i 2>&1
     if [ $? -ne 0 ]; then
         cat ${CLIENT_LOG}.$i
         RET=1
@@ -571,6 +608,44 @@ fi
 kill $SERVER_PID
 wait $SERVER_PID
 
+# Repeated protocol, not allowed
+SERVER_ARGS="--model-repository=${MODELDIR} \
+             --grpc-restricted-protocol=model-repository,health:k1=v1 \
+             --grpc-restricted-protocol=metadata,health:k2=v2"
+run_server
+EXPECTED_MSG="protocol 'health' can not be specified in multiple config group"
+if [ "$SERVER_PID" != "0" ]; then
+    echo -e "\n***\n*** Expect fail to start $SERVER\n***"
+    kill $SERVER_PID
+    wait $SERVER_PID
+    RET=1
+elif [ `grep -c "${EXPECTED_MSG}" ${SERVER_LOG}` != "1" ]; then
+    echo -e "\n***\n*** Failed. Expected ${EXPECTED_MSG} to be found in log\n***"
+    cat $SERVER_LOG
+    RET=1
+fi
+
+# Test restricted protocols
+SERVER_ARGS="--model-repository=${MODELDIR} \
+             --grpc-restricted-protocol=model-repository:admin-key=admin-value \
+             --grpc-restricted-protocol=inference,health:infer-key=infer-value"
+run_server
+if [ "$SERVER_PID" == "0" ]; then
+    echo -e "\n***\n*** Failed to start $SERVER\n***"
+    cat $SERVER_LOG
+    exit 1
+fi
+set +e
+python $PYTHON_UNIT_TEST RestrictedProtocolTest > $CLIENT_LOG 2>&1
+if [ $? -ne 0 ]; then
+    cat $CLIENT_LOG
+    echo -e "\n***\n*** Python GRPC Restricted Protocol Test Failed\n***"
+    RET=1
+fi
+set -e
+kill $SERVER_PID
+wait $SERVER_PID
+
 if [ $RET -eq 0 ]; then
     echo -e "\n***\n*** Test Passed\n***"
 else
@@ -578,3 +653,4 @@ else
 fi
 
 exit $RET
+

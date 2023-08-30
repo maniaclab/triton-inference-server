@@ -1,5 +1,5 @@
 <!--
-# Copyright 2018-2022, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# Copyright 2018-2023, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
 # modification, are permitted provided that the following conditions
@@ -114,6 +114,56 @@ These options can be used to configure the KeepAlive settings:
 
 For client-side documentation, see [Client-Side GRPC KeepAlive](https://github.com/triton-inference-server/client/blob/main/README.md#grpc-keepalive).
 
+#### Limit Endpoint Access (BETA)
+
+In some use cases, Triton users may want to restrict the access of the protocols on a given endpoint.
+For example, there can be need for two separate protocol groups that one exposes standard inference
+protocols for user access, while the other one exposes other extension protocols for administration
+usage and should not be accessible by non-admin user.
+
+The following option can be specified to declare an restricted protocol group:
+
+```
+--grpc-restricted-protocol=<protocol_1>,<protocol_2>,...:<restricted-key>=<restricted-value>
+```
+
+The option can be specified multiple times to specifies multiple groups of
+protocols with different restriction settings.
+
+* `protocols` : A comma-separated list of protocols to be included in this
+group. Note that currently a given protocol is not allowed to be included in
+multiple groups. The following protocols are currently recognized by all network
+protocol types mentioned above:
+
+  * `health` : Health endpoint defined for [HTTP/REST](https://github.com/kserve/kserve/blob/master/docs/predict-api/v2/required_api.md#health) and [GRPC](https://github.com/kserve/kserve/blob/master/docs/predict-api/v2/required_api.md#health-1). For GRPC endpoint, this value also exposes [GRPC health check protocol](https://github.com/triton-inference-server/common/blob/main/protobuf/health.proto).
+  * `metadata` : Server / model metadata endpoints defined for [HTTP/REST](https://github.com/kserve/kserve/blob/master/docs/predict-api/v2/required_api.md#server-metadata) and [GRPC](https://github.com/kserve/kserve/blob/master/docs/predict-api/v2/required_api.md#server-metadata-1).
+  * `inference` : Inference endpoints defined for [HTTP/REST](https://github.com/kserve/kserve/blob/master/docs/predict-api/v2/required_api.md#inference) and [GRPC](https://github.com/kserve/kserve/blob/master/docs/predict-api/v2/required_api.md#inference-1).
+  * `shared-memory` : [Shared-memory endpoint](https://github.com/triton-inference-server/server/blob/main/docs/protocol/extension_shared_memory.md).
+  * `model-config` : [Model configuration endpoint](https://github.com/triton-inference-server/server/blob/main/docs/protocol/extension_model_configuration.md).
+  * `model-repository` : [Model repository endpoint](https://github.com/triton-inference-server/server/blob/main/docs/protocol/extension_model_repository.md).
+  * `statistics` : [statistics endpoint](https://github.com/triton-inference-server/server/blob/main/docs/protocol/extension_statistics.md).
+  * `trace` : [trace endpoint](https://github.com/triton-inference-server/server/blob/main/docs/protocol/extension_trace.md).
+  * `logging` : [logging endpoint](https://github.com/triton-inference-server/server/blob/main/docs/protocol/extension_logging.md).
+
+* `restricted-key` : Key to determine the GRPC request header to be checked when a
+request to the protocol is received. The completed header will be in the form of
+`triton-grpc-protocol-<restricted-key>`
+
+* `restricted-value` : The value of the header to be matched in order to proceed in
+the process of the specified protocols.
+
+#### Example
+
+To start server with a subset of protocols to be restricted in use case
+described above, the following command line arguments can be set to accept
+"standard inference" request without additional header and the rest of the
+protocols with `triton-grpc-protocol-<admin-key>=<admin-value>` specified in header:
+
+```
+tritonserver --grpc-restricted-protocol=shared-memory,model-config,model-repository,statistics,trace:<admin-key>=<admin-value> ...
+```
+
+
 ## In-Process Triton Server API
 
 The Triton Inference Server provides a backwards-compatible C API that
@@ -127,15 +177,15 @@ tritonserver.dll. In the Triton Docker image the shared library is
 found in /opt/tritonserver/lib. The header file that defines and
 documents the Server API is
 [tritonserver.h](https://github.com/triton-inference-server/core/blob/main/include/triton/core/tritonserver.h).
-[Java bindings for In-Process Triton Server API](#java-bindings-for-in-process-triton-server-api) 
-are built on top of `tritonserver.h` and can be used for Java applications that 
+[Java bindings for In-Process Triton Server API](#java-bindings-for-in-process-triton-server-api)
+are built on top of `tritonserver.h` and can be used for Java applications that
 need to use Tritonserver in-process.
 
 All capabilities of Triton server are encapsulated in the shared
 library and are exposed via the Server API. The `tritonserver`
 executable implements HTTP/REST and GRPC endpoints and uses the Server
 API to communicate with core Triton logic. The primary source files
-for the endpoints are [grpc_server.cc](https://github.com/triton-inference-server/server/blob/main/src/grpc_server.cc) and
+for the endpoints are [grpc_server.cc](https://github.com/triton-inference-server/server/blob/main/src/grpc/grpc_server.cc) and
 [http_server.cc](https://github.com/triton-inference-server/server/blob/main/src/http_server.cc). In these source files you can
 see the Server API being used.
 
@@ -156,7 +206,7 @@ When you link the Triton shared library into your application you are
 *not* spawning a separate Triton process, instead, you are including
 the Triton core logic directly in your application. The Triton
 HTTP/REST or GRPC protocols are not used to communicate with this
-Triton core logic, instead all communication between your appliation
+Triton core logic, instead all communication between your application
 and the Triton core logic must take place via the [Server
 API](https://github.com/triton-inference-server/core/blob/main/include/triton/core/tritonserver.h).
 
@@ -326,7 +376,7 @@ A simple example using the C API can be found in
 found in the source that implements the HTTP/REST and GRPC endpoints
 for Triton. These endpoints use the C API to communicate with the core
 of Triton. The primary source files for the endpoints are
-[grpc_server.cc](https://github.com/triton-inference-server/server/blob/main/src/grpc_server.cc) and
+[grpc_server.cc](https://github.com/triton-inference-server/server/blob/main/src/grpc/grpc_server.cc) and
 [http_server.cc](https://github.com/triton-inference-server/server/blob/main/src/http_server.cc).
 
 ## Java bindings for In-Process Triton Server API
@@ -334,14 +384,17 @@ of Triton. The primary source files for the endpoints are
 The Triton Inference Server uses [Java CPP](https://github.com/bytedeco/javacpp)
 to create bindings around Tritonserver to create Java API.
 
-The API is documented in 
+The API is documented in
 [tritonserver.java](https://github.com/bytedeco/javacpp-presets/blob/master/tritonserver/src/gen/java/org/bytedeco/tritonserver/global/tritonserver.java).
 Alternatively, the user can refer to the web version [API docs](http://bytedeco.org/javacpp-presets/tritonserver/apidocs/)
 generated from `tritonserver.java`.
+**Note:** Currently, `tritonserver.java` contains bindings for both the `In-process C-API`
+and the bindings for `C-API Wrapper`. More information about the [developer_tools/server C-API wrapper](https://github.com/triton-inference-server/developer_tools/blob/main/server/README.md) can be found in the [developer_tools repository](https://github.com/triton-inference-server/developer_tools/).
+
 A simple example using the Java API can be found in
 [Samples folder](https://github.com/bytedeco/javacpp-presets/tree/master/tritonserver/samples)
-which includes `Simple.java` which is similar to 
-[`simple.cc`](https://github.com/triton-inference-server/server/blob/main/src/simple.cc). 
+which includes `Simple.java` which is similar to
+[`simple.cc`](https://github.com/triton-inference-server/server/blob/main/src/simple.cc).
 Please refer to
 [sample usage documentation](https://github.com/bytedeco/javacpp-presets/tree/master/tritonserver#sample-usage)
 to learn about how to build and run `Simple.java`.
@@ -385,17 +438,20 @@ After ensuring that Tritonserver and dependencies are installed, you can run you
 Java program with the Java bindings with the following steps:
 
 1. Place Java bindings into your environment. You can do this by either:
-   
+
    a. Building Java API bindings with provided build script:
       ```bash
       # Clone Triton client repo. Recommended client repo tag is: main
       $ git clone --single-branch --depth=1 -b <client repo tag>
                      https://github.com/triton-inference-server/client.git clientrepo
       # Run build script
+      ## For In-Process C-API Java Bindings
       $ source clientrepo/src/java-api-bindings/scripts/install_dependencies_and_build.sh
+      ## For C-API Wrapper Java Bindings
+      $ source clientrepo/src/java-api-bindings/scripts/install_dependencies_and_build.sh --enable-developer-tools-server`
       ```
       This will install the Java bindings to `/workspace/install/java-api-bindings/tritonserver-java-bindings.jar`
-   
+
    *or*
 
    b. Copying "Uber Jar" from Triton SDK container to your environment
@@ -403,7 +459,8 @@ Java program with the Java bindings with the following steps:
       $ id=$(docker run -dit nvcr.io/nvidia/tritonserver:<triton container version>-py3-sdk bash)
       $ docker cp ${id}:/workspace/install/java-api-bindings/tritonserver-java-bindings.jar <Uber Jar directory>/tritonserver-java-bindings.jar
       $ docker stop ${id}
-      ``` 
+      ```
+      **Note:** `tritonserver-java-bindings.jar` only includes the `In-Process Java Bindings`. To use the `C-API Wrapper Java Bindings`, please use the build script.
 2. Use the built "Uber Jar" that contains the Java bindings
    ```bash
    $ java -cp <Uber Jar directory>/tritonserver-java-bindings.jar <your Java program>
@@ -417,7 +474,7 @@ bindings Jar](#run-java-program-with-java-bindings-jar) to also build the jar
 yourself without any modifications to the Tritonserver bindings in
 JavaCPP-presets. You can do this using the following steps:
 
-1. Create the JNI binaries in your local repository (`/root/.m2/repository`) 
+1. Create the JNI binaries in your local repository (`/root/.m2/repository`)
    with [`javacpp-presets/tritonserver`](https://github.com/bytedeco/javacpp-presets/tree/master/tritonserver)
 ```bash
  $ git clone https://github.com/bytedeco/javacpp-presets.git
@@ -425,8 +482,8 @@ JavaCPP-presets. You can do this using the following steps:
  $ mvn clean install --projects .,tritonserver
  $ mvn clean install -f platform --projects ../tritonserver/platform -Djavacpp.platform=linux-x86_64
 ```
-2. Create your custom `*.pom` file for Maven. Please refer to 
-   [samples/simple/pom.xml](https://github.com/bytedeco/javacpp-presets/blob/master/tritonserver/samples/simple/pom.xml) as 
+2. Create your custom `*.pom` file for Maven. Please refer to
+   [samples/simple/pom.xml](https://github.com/bytedeco/javacpp-presets/blob/master/tritonserver/samples/simple/pom.xml) as
    reference for how to create your pom file.
 3. After creating your `pom.xml` file you can build your application with:
 ```bash

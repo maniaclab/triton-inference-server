@@ -1,4 +1,5 @@
-# Copyright 2018-2022, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+#!/bin/bash
+# Copyright 2018-2023, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
 # modification, are permitted provided that the following conditions
@@ -66,7 +67,7 @@ function wait_for_server_ready() {
 
     local wait_secs=$wait_time_secs
     until test $wait_secs -eq 0 ; do
-        if ! kill -0 $spid; then
+        if ! kill -0 $spid > /dev/null 2>&1; then
             echo "=== Server not running."
             WAIT_RET=1
             return
@@ -146,6 +147,33 @@ function wait_for_model_stable() {
     echo "=== Timeout $wait_time_secs secs. Not all models stable."
 }
 
+function gdb_helper () {
+  if ! command -v gdb > /dev/null 2>&1; then
+    echo "=== WARNING: gdb not installed"
+    return
+  fi
+
+  ### Server Hang ###
+  if kill -0 ${SERVER_PID} > /dev/null 2>&1; then
+    # If server process is still alive, try to get backtrace and core dump from it
+    GDB_LOG="gdb_bt.${SERVER_PID}.log"
+    echo -e "=== WARNING: SERVER HANG DETECTED, DUMPING GDB BACKTRACE TO [${PWD}/${GDB_LOG}] ==="
+    # Dump backtrace log for quick analysis. Allow these commands to fail.
+    gdb -batch -ex "thread apply all bt" -p "${SERVER_PID}" 2>&1 | tee "${GDB_LOG}" || true
+
+    # Generate core dump for deeper analysis. Default filename is "core.${PID}"
+    gdb -batch -ex "gcore" -p "${SERVER_PID}" || true
+  fi
+
+  ### Server Segfaulted ###
+  # If there are any core dumps locally from a segfault, load them and get a backtrace
+  for corefile in $(ls core.* > /dev/null 2>&1); do
+    GDB_LOG="${corefile}.log"
+    echo -e "=== WARNING: SEGFAULT DETECTED, DUMPING GDB BACKTRACE TO [${PWD}/${GDB_LOG}] ==="
+    gdb -batch ${SERVER} ${corefile} -ex "thread apply all bt" | tee "${corefile}.log" || true;
+  done
+}
+
 # Run inference server. Return once server's health endpoint shows
 # ready or timeout expires. Sets SERVER_PID to pid of SERVER, or 0 if
 # error (including expired timeout)
@@ -173,20 +201,11 @@ function run_server () {
 
     wait_for_server_ready $SERVER_PID $SERVER_TIMEOUT
     if [ "$WAIT_RET" != "0" ]; then
-        # If gdb is installed, collect a backtrace from the hanging process
-        if command -v gdb; then
-          GDB_LOG="gdb_bt.${SERVER_PID}.log"
-          echo -e "=== WARNING: SERVER FAILED TO START, DUMPING GDB BACKTRACE TO [${PWD}/${GDB_LOG}] ==="
-          # Dump backtrace log for quick analysis. Allow these commands to fail.
-          gdb -batch -ex "thread apply all bt" -p "${SERVER_PID}" 2>&1 | tee "${GDB_LOG}" || true
-          # Generate core dump for deeper analysis. Default filename is "core.${PID}"
-          gdb -batch -ex "gcore" -p "${SERVER_PID}" || true
-        else
-          echo -e "=== ERROR: SERVER FAILED TO START, BUT GDB NOT FOUND ==="
-        fi
+        # Get further debug information about server startup failure
+        gdb_helper || true
 
         # Cleanup
-        kill $SERVER_PID || true
+        kill $SERVER_PID > /dev/null 2>&1 || true
         SERVER_PID=0
     fi
 }
@@ -447,4 +466,45 @@ function kill_servers () {
         kill ${!server_pid[$i]}
         wait ${!server_pid[$i]}
     done
+}
+
+# Collect all logs and core dumps and copy them to an upper-level directory for
+# proper capture on the CI.
+function collect_artifacts_from_subdir () {
+    cp *.*log* core* ../ || true
+}
+
+# Sort an array
+# Call with sort_array <array_name>
+# Example: remove_array_outliers array
+sort_array() {
+    local -n arr=$1
+    local length=${#arr[@]}
+
+    if [ "$length" -le 1 ]; then
+        return
+    fi
+
+    IFS=$'\n' sorted_arr=($(sort -n <<<"${arr[*]}"))
+    unset IFS
+    arr=("${sorted_arr[@]}")
+}
+
+# Remove an array's outliers
+# Call with remove_array_outliers <array_name> <percent to trim from both sides>
+# Example: remove_array_outliers array 5
+remove_array_outliers() {
+    local -n arr=$1
+    local percent=$2
+    local length=${#arr[@]}
+
+    if [ "$length" -le 1 ]; then
+        return
+    fi
+
+    local trim_count=$((length * percent / 100))
+    local start_index=$trim_count
+    local end_index=$((length - (trim_count*2)))
+
+    arr=("${arr[@]:$start_index:$end_index}")
 }

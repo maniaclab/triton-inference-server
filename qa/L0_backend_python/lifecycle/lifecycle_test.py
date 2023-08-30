@@ -1,4 +1,6 @@
-# Copyright 2019-2022, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+#!/usr/bin/env python3
+
+# Copyright 2019-2023, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
 # modification, are permitted provided that the following conditions
@@ -28,19 +30,19 @@ import sys
 
 sys.path.append("../../common")
 
-import test_util as tu
-import shm_util
-from functools import partial
-import tritonclient.http as httpclient
-import tritonclient.grpc as grpcclient
-from tritonclient.utils import *
-import numpy as np
-import unittest
 import queue
+import unittest
+from functools import partial
+
+import numpy as np
+import shm_util
+import test_util as tu
+import tritonclient.grpc as grpcclient
+import tritonclient.http as httpclient
+from tritonclient.utils import *
 
 
 class UserData:
-
     def __init__(self):
         self._completed_requests = queue.Queue()
 
@@ -53,17 +55,17 @@ def callback(user_data, result, error):
 
 
 class LifecycleTest(tu.TestResultCollector):
-
     def setUp(self):
         self._shm_leak_detector = shm_util.ShmLeakDetector()
 
     def test_batch_error(self):
-        # The execute_error model returns an error for the first request and
-        # sucessfully processes the second request. This is making sure that
-        # an error in a single request does not completely fail the batch.
+        # The execute_error model returns an error for the first and third
+        # request and successfully processes the second request. This is making
+        # sure that an error in a single request does not completely fail the
+        # batch.
         model_name = "execute_error"
         shape = [2, 2]
-        number_of_requests = 2
+        number_of_requests = 3
         user_data = UserData()
         triton_client = grpcclient.InferenceServerClient("localhost:8001")
         triton_client.start_stream(callback=partial(callback, user_data))
@@ -74,16 +76,16 @@ class LifecycleTest(tu.TestResultCollector):
                 input_data = np.random.randn(*shape).astype(np.float32)
                 input_datas.append(input_data)
                 inputs = [
-                    grpcclient.InferInput("IN", input_data.shape,
-                                          np_to_triton_dtype(input_data.dtype))
+                    grpcclient.InferInput(
+                        "IN", input_data.shape, np_to_triton_dtype(input_data.dtype)
+                    )
                 ]
                 inputs[0].set_data_from_numpy(input_data)
-                triton_client.async_stream_infer(model_name=model_name,
-                                                 inputs=inputs)
+                triton_client.async_stream_infer(model_name=model_name, inputs=inputs)
 
             for i in range(number_of_requests):
                 result = user_data._completed_requests.get()
-                if i == 0:
+                if i == 0 or i == 2:
                     self.assertIs(type(result), InferenceServerException)
                     continue
 
@@ -93,7 +95,9 @@ class LifecycleTest(tu.TestResultCollector):
                 self.assertTrue(
                     np.array_equal(output_data, input_datas[i]),
                     "error: expected output {} to match input {}".format(
-                        output_data, input_datas[i]))
+                        output_data, input_datas[i]
+                    ),
+                )
 
     def test_infer_pymodel_error(self):
         model_name = "wrong_model"
@@ -103,8 +107,9 @@ class LifecycleTest(tu.TestResultCollector):
             with httpclient.InferenceServerClient("localhost:8000") as client:
                 input_data = (16384 * np.random.randn(*shape)).astype(np.uint32)
                 inputs = [
-                    httpclient.InferInput("IN", input_data.shape,
-                                          np_to_triton_dtype(input_data.dtype))
+                    httpclient.InferInput(
+                        "IN", input_data.shape, np_to_triton_dtype(input_data.dtype)
+                    )
                 ]
                 inputs[0].set_data_from_numpy(input_data)
                 try:
@@ -114,21 +119,24 @@ class LifecycleTest(tu.TestResultCollector):
                     self.assertTrue(
                         e.message().startswith(
                             "Failed to process the request(s) for model instance"
-                        ), "Exception message is not correct")
+                        ),
+                        "Exception message is not correct",
+                    )
                 else:
                     self.assertTrue(
-                        False,
-                        "Wrong exception raised or did not raise an exception")
+                        False, "Wrong exception raised or did not raise an exception"
+                    )
 
     def test_incorrect_execute_return(self):
-        model_name = 'execute_return_error'
+        model_name = "execute_return_error"
         shape = [1, 1]
         with self._shm_leak_detector.Probe() as shm_probe:
             with httpclient.InferenceServerClient("localhost:8000") as client:
                 input_data = (5 * np.random.randn(*shape)).astype(np.float32)
                 inputs = [
-                    httpclient.InferInput("INPUT", input_data.shape,
-                                          np_to_triton_dtype(input_data.dtype))
+                    httpclient.InferInput(
+                        "INPUT", input_data.shape, np_to_triton_dtype(input_data.dtype)
+                    )
                 ]
                 inputs[0].set_data_from_numpy(input_data)
 
@@ -137,10 +145,11 @@ class LifecycleTest(tu.TestResultCollector):
                     client.infer(model_name, inputs)
 
                 self.assertTrue(
-                    str(e.exception).startswith(
-                        "Failed to process the request(s) for model instance "
-                        "'execute_return_error_0', message: Expected a list in the "
-                        "execute return"), "Exception message is not correct.")
+                    "Failed to process the request(s) for model instance "
+                    "'execute_return_error_0_0', message: Expected a list in the "
+                    "execute return" in str(e.exception),
+                    "Exception message is not correct.",
+                )
 
                 # The second inference request will return a list of None object
                 # instead of Python InferenceResponse objects.
@@ -148,12 +157,13 @@ class LifecycleTest(tu.TestResultCollector):
                     client.infer(model_name, inputs)
 
                 self.assertTrue(
-                    str(e.exception).startswith(
-                        "Failed to process the request(s) for model instance "
-                        "'execute_return_error_0', message: Expected an "
-                        "'InferenceResponse' object in the execute function return"
-                        " list"), "Exception message is not correct.")
+                    "Failed to process the request(s) for model instance "
+                    "'execute_return_error_0_0', message: Expected an "
+                    "'InferenceResponse' object in the execute function return"
+                    " list" in str(e.exception),
+                    "Exception message is not correct.",
+                )
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     unittest.main()
