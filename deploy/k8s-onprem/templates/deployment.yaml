@@ -70,7 +70,7 @@ spec:
               nvidia.com/gpu: {{ .Values.image.numGpus }}
 
 #          args: ["tritonserver", "--model-repository=/models"]
-          args: ["tritonserver", "--model-repository={{ .Values.image.modelRepository_s3 }}", "--exit-on-error=false"]
+          args: ["tritonserver", "--model-repository={{ .Values.image.modelRepository_s3 }}", "--exit-on-error=false","--model-control-mode=poll","--repository-poll-secs=60"]
           env:
             - name: AWS_ACCESS_KEY_ID
               valueFrom:
