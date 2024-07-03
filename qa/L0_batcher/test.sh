@@ -1,5 +1,5 @@
 #!/bin/bash
-# Copyright 2018-2022, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# Copyright 2018-2023, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
 # modification, are permitted provided that the following conditions
@@ -74,7 +74,7 @@ if [ "$TEST_VALGRIND" -eq 1 ]; then
                                 test_multi_batch_different_shape_allow_ragged"
 fi
 
-TF_VERSION=${TF_VERSION:=1}
+TF_VERSION=${TF_VERSION:=2}
 
 # On windows the paths invoked by the script (running in WSL) must use
 # /mnt/c when needed but the paths on the tritonserver command-line
@@ -91,6 +91,14 @@ else
     TRITON_DIR=${TRITON_DIR:="/opt/tritonserver"}
     SERVER=${TRITON_DIR}/bin/tritonserver
     BACKEND_DIR=${TRITON_DIR}/backends
+
+    # PyTorch on SBSA requires libgomp to be loaded first. See the following
+    # GitHub issue for more information:
+    # https://github.com/pytorch/pytorch/issues/2575
+    arch=`uname -m`
+    if [ $arch = "aarch64" ]; then
+      SERVER_LD_PRELOAD=/usr/lib/$(uname -m)-linux-gnu/libgomp.so.1
+    fi
 fi
 
 SERVER_ARGS_EXTRA="--backend-directory=${BACKEND_DIR} --backend-config=tensorflow,version=${TF_VERSION}"
@@ -138,7 +146,7 @@ MAX_QUEUE_DELAY_ONLY_TESTS=${MAX_QUEUE_DELAY_ONLY_TESTS:="test_max_queue_delay_o
                                                     test_max_queue_delay_only_non_default"}
 
 # Setup non-variable-size model repository
-rm -fr *.log *.serverlog models && mkdir models
+rm -fr *.log  models && mkdir models
 for BACKEND in $BACKENDS; do
     TMP_MODEL_DIR="$DATADIR/qa_model_repository/${BACKEND}_float32_float32_float32"
     if [ "$BACKEND" == "python" ]; then
@@ -151,7 +159,7 @@ for BACKEND in $BACKENDS; do
         cp $onnx_model/output0_labels.txt models/$python_model
         cp ../python_models/add_sub/model.py models/$python_model/1/
     else
-        cp -r $TMP_MODEL_DIR models/. 
+        cp -r $TMP_MODEL_DIR models/.
     fi
     (cd models/$(basename $TMP_MODEL_DIR) && \
           sed -i "s/^max_batch_size:.*/max_batch_size: 8/" config.pbtxt && \
@@ -242,6 +250,19 @@ if [[ $BACKENDS == *"onnx"* ]]; then
                     dynamic_batching { preferred_batch_size: [ 2, 6 ], max_queue_delay_microseconds: 10000000 }" >> config.pbtxt)
 fi
 
+if [[ $BACKENDS == *"libtorch"* ]]; then
+    # Use nobatch model to match the ragged test requirement
+    cp -r $DATADIR/qa_identity_model_repository/libtorch_nobatch_zero_1_float32 var_models/libtorch_zero_1_float32 && \
+        (cd var_models/libtorch_zero_1_float32 && \
+            sed -i "s/nobatch_//" config.pbtxt && \
+            sed -i "s/^max_batch_size:.*/max_batch_size: 8/" config.pbtxt && \
+            sed -i "s/name: \"INPUT__0\"/name: \"INPUT__0\"\\nallow_ragged_batch: true/" config.pbtxt && \
+            echo "batch_output [{target_name: \"OUTPUT__0\" \
+                                    kind: BATCH_SCATTER_WITH_INPUT_SHAPE \
+                                    source_input: \"INPUT__0\" }] \
+                    dynamic_batching { preferred_batch_size: [ 2, 6 ], max_queue_delay_microseconds: 10000000 }" >> config.pbtxt)
+fi
+
 # Need to launch the server for each test so that the model status is
 # reset (which is used to make sure the correctly batch size was used
 # for execution). Test everything with fixed-tensor-size models and
@@ -252,7 +273,7 @@ for model_type in FIXED VARIABLE; do
     MODEL_PATH=models && [[ "$model_type" == "VARIABLE" ]] && MODEL_PATH=var_models
     for i in $NO_DELAY_TESTS ; do
         SERVER_ARGS="--model-repository=$MODELDIR/$MODEL_PATH ${SERVER_ARGS_EXTRA}"
-        SERVER_LOG="./$i.$model_type.serverlog"
+        SERVER_LOG="./$i.$model_type.server.log"
 
         if [ "$TEST_VALGRIND" -eq 1 ]; then
             LEAKCHECK_LOG="./$i.$model_type.valgrind.log"
@@ -305,7 +326,7 @@ for model_type in FIXED VARIABLE; do
             [[ "$i" != "test_multi_batch_use_best_preferred" ]] &&
             [[ "$i" != "test_multi_batch_delayed_use_max_batch" ]] && export TRITONSERVER_DELAY_SCHEDULER=2
         SERVER_ARGS="--model-repository=$MODELDIR/$MODEL_PATH ${SERVER_ARGS_EXTRA}"
-        SERVER_LOG="./$i.$model_type.serverlog"
+        SERVER_LOG="./$i.$model_type.server.log"
 
         if [ "$TEST_VALGRIND" -eq 1 ]; then
             LEAKCHECK_LOG="./$i.$model_type.valgrind.log"
@@ -355,7 +376,7 @@ done
 export BATCHER_TYPE=VARIABLE
 for i in $DIFFERENT_SHAPE_TESTS ; do
     SERVER_ARGS="--model-repository=$MODELDIR/var_models ${SERVER_ARGS_EXTRA}"
-    SERVER_LOG="./$i.VARIABLE.serverlog"
+    SERVER_LOG="./$i.VARIABLE.server.log"
 
     if [ "$TEST_VALGRIND" -eq 1 ]; then
         LEAKCHECK_LOG="./$i.VARIABLE.valgrind.log"
@@ -408,7 +429,7 @@ for i in \
         test_multi_batch_delayed_preferred_different_shape ; do
     export TRITONSERVER_DELAY_SCHEDULER=4
     SERVER_ARGS="--model-repository=$MODELDIR/var_models ${SERVER_ARGS_EXTRA}"
-    SERVER_LOG="./$i.VARIABLE.serverlog"
+    SERVER_LOG="./$i.VARIABLE.server.log"
 
     if [ "$TEST_VALGRIND" -eq 1 ]; then
         LEAKCHECK_LOG="./$i.VARIABLE.valgrind.log"
@@ -461,7 +482,7 @@ for i in $PREFERRED_BATCH_ONLY_TESTS ; do
             [[ "$i" != "test_preferred_batch_only_unaligned" ]] && export TRITONSERVER_DELAY_SCHEDULER=7 &&
             [[ "$i" != "test_preferred_batch_only_use_biggest_preferred" ]] && export TRITONSERVER_DELAY_SCHEDULER=3
     SERVER_ARGS="--model-repository=$MODELDIR/preferred_batch_only_models ${SERVER_ARGS_EXTRA}"
-    SERVER_LOG="./$i.PREFERRED_BATCH_ONLY.serverlog"
+    SERVER_LOG="./$i.PREFERRED_BATCH_ONLY.server.log"
 
     if [ "$TEST_VALGRIND" -eq 1 ]; then
         LEAKCHECK_LOG="./$i.PREFERRED_BATCH_ONLY.valgrind.log"
@@ -530,7 +551,7 @@ for i in $MAX_QUEUE_DELAY_ONLY_TESTS ; do
         sed -i "s/max_queue_delay_microseconds:.*\[.*\]/max_queue_delay_microseconds: ${MAX_QUEUE_DELAY_MICROSECONDS}/g" config.pbtxt )
 
     SERVER_ARGS="--model-repository=$MODELDIR/custom_models ${SERVER_ARGS_EXTRA}"
-    SERVER_LOG="./$i.MAX_QUEUE_DELAY_ONLY.serverlog"
+    SERVER_LOG="./$i.MAX_QUEUE_DELAY_ONLY.server.log"
 
     if [ "$TEST_VALGRIND" -eq 1 ]; then
         LEAKCHECK_LOG="./$i.MAX_QUEUE_DELAY_ONLY.valgrind.log"
@@ -608,7 +629,7 @@ if [[ "$(< /proc/sys/kernel/osrelease)" != *microsoft* ]]; then
 
     # not preserve
     SERVER_ARGS="--trace-file=not_preserve.log --trace-level=MIN --trace-rate=1 --model-repository=$MODELDIR/custom_models ${SERVER_ARGS_EXTRA}"
-    SERVER_LOG="./not_preserve.serverlog"
+    SERVER_LOG="./not_preserve.server.log"
 
     if [ "$TEST_VALGRIND" -eq 1 ]; then
         LEAKCHECK_LOG="./not_preserve.valgrind.log"
@@ -663,7 +684,7 @@ if [[ "$(< /proc/sys/kernel/osrelease)" != *microsoft* ]]; then
             sed -i "s/dynamic_batching.*/dynamic_batching { preferred_batch_size: [ 4 ] preserve_ordering: true }/g" config.pbtxt)
 
     SERVER_ARGS="--trace-file=preserve.log --trace-level=MIN --trace-rate=1 --model-repository=$MODELDIR/custom_models  ${SERVER_ARGS_EXTRA}"
-    SERVER_LOG="./preserve.serverlog"
+    SERVER_LOG="./preserve.server.log"
 
     if [ "$TEST_VALGRIND" -eq 1 ]; then
         LEAKCHECK_LOG="./preserve.valgrind.log"

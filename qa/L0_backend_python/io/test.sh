@@ -1,5 +1,5 @@
 #!/bin/bash
-# Copyright 2021-2022, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# Copyright 2021-2023, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
 # modification, are permitted provided that the following conditions
@@ -26,7 +26,7 @@
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 UNITTEST_PY=./io_test.py
-CLIENT_LOG="./client.log"
+CLIENT_LOG="./io_client.log"
 EXPECTED_NUM_TESTS="1"
 TEST_RESULT_FILE='test_results.txt'
 source ../common.sh
@@ -37,13 +37,13 @@ SERVER=${TRITON_DIR}/bin/tritonserver
 BACKEND_DIR=${TRITON_DIR}/backends
 
 SERVER_ARGS="--model-repository=`pwd`/models --backend-directory=${BACKEND_DIR} --log-verbose=1"
-SERVER_LOG="./inference_server.log"
+SERVER_LOG="./io_server.log"
 
 RET=0
 rm -fr *.log ./models
 
 pip3 uninstall -y torch
-pip3 install torch==1.13.0
+pip3 install torch==1.13.0+cu117 -f https://download.pytorch.org/whl/torch_stable.html
 
 # IOTest.test_ensemble_io
 TRIALS="default decoupled"
@@ -171,5 +171,7 @@ if [ $RET -eq 0 ]; then
 else
     echo -e "\n***\n*** IO test FAILED.\n***"
 fi
+
+collect_artifacts_from_subdir
 
 exit $RET

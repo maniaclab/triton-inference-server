@@ -1,4 +1,4 @@
-# Copyright 2022, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# Copyright 2022-2023, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
 # modification, are permitted provided that the following conditions
@@ -24,19 +24,15 @@
 # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import numpy as np
-import sys
-import os
 import triton_python_backend_utils as pb_utils
 from cuda import cuda
 
 
 class TritonPythonModel:
-
     @staticmethod
     def auto_complete_config(auto_complete_model_config):
-        input = {'name': 'INPUT', 'data_type': 'TYPE_FP32', 'dims': [1]}
-        output = {'name': 'OUTPUT', 'data_type': 'TYPE_FP32', 'dims': [1]}
+        input = {"name": "INPUT", "data_type": "TYPE_FP32", "dims": [1]}
+        output = {"name": "OUTPUT", "data_type": "TYPE_FP32", "dims": [1]}
 
         auto_complete_model_config.set_max_batch_size(0)
         auto_complete_model_config.add_input(input)
@@ -51,14 +47,12 @@ class TritonPythonModel:
         cuda.cuCtxCreate(0, 0)
 
         mem_info = cuda.cuMemGetInfo()
-        if (mem_info[0] != 0):
-            raise pb_utils.TritonModelException(
-                "Failed to get CUDA memory info")
+        if mem_info[0] != 0:
+            raise pb_utils.TritonModelException("Failed to get CUDA memory info")
 
         mem_alloc = cuda.cuMemAlloc(mem_info[2] * 0.4)
-        if (mem_alloc[0] != 0):
-            raise pb_utils.TritonModelException(
-                "Failed to allocate CUDA memory")
+        if mem_alloc[0] != 0:
+            raise pb_utils.TritonModelException("Failed to allocate CUDA memory")
         self.mem_ptr = mem_alloc[1]
 
     def finalize(self):
@@ -66,8 +60,7 @@ class TritonPythonModel:
             cuda.cuMemFree(self.mem_ptr)
 
     def execute(self, requests):
-        """ This function is called on inference request.
-        """
+        """This function is called on inference request."""
         responses = []
         for request in requests:
             input_tensor = pb_utils.get_input_tensor_by_name(request, "INPUT0")

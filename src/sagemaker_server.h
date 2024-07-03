@@ -1,4 +1,4 @@
-// Copyright 2021-2022, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+// Copyright 2021-2023, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions
@@ -26,6 +26,7 @@
 #pragma once
 
 #include <sys/stat.h>
+
 #include <fstream>
 #include <mutex>
 
@@ -71,13 +72,14 @@ class SagemakerAPIServer : public HTTPAPIServer {
       const int32_t port, const std::string address, const int thread_cnt)
       : HTTPAPIServer(
             server, trace_manager, shm_manager, port, false /* reuse_port */,
-            address, thread_cnt),
+            address, "" /* header_forward_pattern */, thread_cnt),
         ping_regex_(R"(/ping)"), invocations_regex_(R"(/invocations)"),
         models_regex_(R"(/models(?:/)?([^/]+)?(/invoke)?)"),
         model_path_regex_(
             R"((\/opt\/ml\/models\/[0-9A-Za-z._]+)\/(model)\/?([0-9A-Za-z._]+)?)"),
         platform_ensemble_regex_(R"(platform:(\s)*\"ensemble\")"),
-        ping_mode_("live"),
+        ping_mode_(GetEnvironmentVariableOrDefault(
+            "SAGEMAKER_TRITON_PING_MODE", "ready")),
         model_name_(GetEnvironmentVariableOrDefault(
             "SAGEMAKER_TRITON_DEFAULT_MODEL_NAME",
             "unspecified_SAGEMAKER_TRITON_DEFAULT_MODEL_NAME")),
@@ -105,6 +107,9 @@ class SagemakerAPIServer : public HTTPAPIServer {
 
   void SageMakerMMEUnloadModel(evhtp_request_t* req, const char* model_name);
 
+  TRITONSERVER_Error* SageMakerMMECheckUnloadedModelIsUnavailable(
+      const char* model_name, bool* is_model_unavailable);
+
   void SageMakerMMEListModel(evhtp_request_t* req);
 
   void SageMakerMMEGetModel(evhtp_request_t* req, const char* model_name);
@@ -126,7 +131,7 @@ class SagemakerAPIServer : public HTTPAPIServer {
       size_t* header_length) override;
 
 
-  // Currently the compresssion schema hasn't been defined,
+  // Currently the compression schema hasn't been defined,
   // assume identity compression type is used for both request and response
   DataCompressor::Type GetRequestCompressionType(evhtp_request_t* req) override
   {
@@ -155,7 +160,13 @@ class SagemakerAPIServer : public HTTPAPIServer {
   std::unordered_map<std::string, std::string> sagemaker_models_list_;
 
   /* Mutex to handle concurrent updates */
-  std::mutex mutex_;
+  std::mutex models_list_mutex_;
+
+  /* Constants */
+  const uint32_t UNLOAD_TIMEOUT_SECS_ = 350;
+  const uint32_t UNLOAD_SLEEP_MILLISECONDS_ = 500;
+  const std::string UNLOAD_EXPECTED_STATE_ = "UNAVAILABLE";
+  const std::string UNLOAD_EXPECTED_REASON_ = "unloaded";
 };
 
 }}  // namespace triton::server
