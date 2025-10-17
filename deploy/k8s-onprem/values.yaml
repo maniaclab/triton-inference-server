@@ -37,6 +37,13 @@ image:
   modelRepository_s3_secret: triton-s3-secret
   numGpus: 1
 
+# add server args here e.g. --grpc-use-ssl, --grpc-server-certs, repository-poll-secs, etc
+serverArgs:
+  - '--model-repository="s3://https://s3.ssl-hep.org:443/triton-8a469661-57ce-494b-84d0-c91899b9458d/models"'
+  - '--exit-on-error=false'
+  - '--model-control-mode=poll'
+  - '--repository-poll-secs=60'
+
 deployment:
   livenessProbe:
     initialDelaySeconds: 10
