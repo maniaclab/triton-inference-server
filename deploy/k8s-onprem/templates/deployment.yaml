@@ -98,7 +98,7 @@ spec:
                 secretKeyRef:
                   name: {{ .Values.image.modelRepository_s3_secret }}
                   key: AWS_SECRET_ACCESS_KEY
-            - name: TRANSFORMERS_CACHE
+            - name: TRITON_CACHE_DIR
               value: "/home/ubuntu"
 
           ports:
